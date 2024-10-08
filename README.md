@@ -1,89 +1,42 @@
 # Overview
 
-Verifying the functionality of PRs in the `release` repo can be a bit challenging due to the large number of steps and/or jobs that are run when a PR is tested. The intent of this project is to provide a development environment where changes to the `release` repo can be verified locally while still working with real cloud backends.  This environment is not intended to replace verifying a PR via `pj-rehearse`.  It is solely intended to allow faster iteration of changes and
-allow mocking of configurations that are not readily possible with `pj-rehearse` today.  For example, I need to run job `x` against version `y`.  This environment is presently skewed towards development of periodics.
+Verifying the functionality of PRs in the `release` repo can be a bit challenging due to the large number of steps and/or jobs that are run when a PR is tested. The intent of this project is to provide a development environment where changes to the `release` repo can be verified locally while still working with real cloud backends.  This environment is not intended to replace verifying a PR via `pj-rehearse`. 
 
-This project is not a 'turn-key' solution. You must be knowledgable, to an extent, on how the `release` repo runs workflows. 
+This tool requires in-depth knowledge of how the CI workflow you're working with works. You'll need to provide the necessary environment variables and make updates to accomodate any 
+other artifacts the workflow may need. Additionally, if any tools are required by the workflow that are not provisioned in the workflow, those tools must be made available on the system path.
 
 ## Requirements
 
-- Kubernetes cluster which will host secrets and act as the executor the CI workflow
-- Container registry which will host image with required tools, installer, and openshift-tests
-- Necessary credentials to install in your cloud of choice
+- Necessary credentials to install in your cloud or enviornment of choice
 
+## Using the tool
 
+Each workflow may require slightly different artifacts and environment variables. To accomodate this, each platform has a platform-specific `env.py`. This file should be in the same directory as
+`main.py` when running the tool. `env.py` can be symlinked to the same directory as `main.py`.
 
-## Building a Kubernetes Cluster
+`ci-runner.py` allows for a workflow, chain, or individual step to be run. 
 
-This workflow was tested with a [kind](https://kind.sigs.k8s.io/) cluster.  All secrets and pods were created in the `default` namespace.
+```sh
+$ ./ci-runner.py --help
+usage: ci-runner.py [-h] [--run-chain RUN_CHAIN] [--run-step RUN_STEP] [--run-workflow RUN_WORKFLOW] [--intialize]
 
-## Building a Workflow Runner Image
+A CLI tool for executing CI operator artifacts
 
-The example below builds an image with the following attributes:
-- Required tooling needed by CI workflows. This will vary based on the workflows you're running.
-- Based on ubi8
-- Packages installer and oc clients
-- Packages openshift-tests
+options:
+  -h, --help            show this help message and exit
+  --run-chain RUN_CHAIN
+                        Run the specified chain
+  --run-step RUN_STEP   Run the specified step
+  --run-workflow RUN_WORKFLOW
+                        Run the specified workflow
+  --intialize           Initializes local directories to prepare for running artifacts
+```
 
-See `Dockerfile` for an example.
+When adding support for a new workflow, the process is somewhat trial and error to determine which variables need to be defined. 
 
-Note: Credentials are __not__ provisioned in the image. They are mounted at runtime.  
+## Shared Directory
 
-## Starting the Image
-
-Below is an example pod spec that deploys a container where workflows are executed. Check each of the environment variables below to determine if they are applicable to the workflow you're running. Not all(most) are relevant to the actual execution of a workflow.
-
-
-See `pod.yaml` for an example.
-
-## Executing the Workflow
-
-The `JOB_NAME_SAFE` environment variable determines which workflow is executed by run.py.  To run a workflow, create and rsh to the `e2e-workflow-runner` pod.
-
-~~~ bash
-$ oc create -f pod.yaml
-$ oc rsh e2e-workflow-runner
-(app-root) sh-4.4$ python run.py
-workflow[openshift-e2e-vsphere-upi-serial] phase[pre]
-ref:[ipi-install-rbac]----> /opt/app-root/src/release/ci-operator/step-registry/ipi/install/rbac/ipi-install-rbac-commands.sh
-skipping ref
-ref:[openshift-cluster-bot-rbac]----> /opt/app-root/src/release/ci-operator/step-registry/openshift/cluster-bot/rbac/openshift-cluster-bot-rbac-commands.sh
-skipping ref
-chain:[upi-vsphere-pre]-->
-ref:[ipi-conf]----> /opt/app-root/src/release/ci-operator/step-registry/ipi/conf/ipi-conf-commands.sh
-Installing from release registry.ci.openshift.org/ocp/release:4.10.0-0.nightly-2021-12-01-210213
-error encountered in[/opt/app-root/src/release/ci-operator/step-registry/ipi/conf/ipi-conf-ref.yaml]
-ref:[ipi-conf-vsphere-check]----> /opt/app-root/src/release/ci-operator/step-registry/ipi/conf/vsphere/check/ipi-conf-vsphere-check-commands.sh
-Scheduling job on IBM Cloud instance
-2021-12-02 18:11:58+00:00 - Creating govc.sh file...
-2021-12-02 18:11:58+00:00 - Creating vsphere_context.sh file...
-2021-12-02 18:11:58+00:00 - Find virtual machines attached to ci-segment-98 and destroy
-~~~
-
-## Secrets
-
-Perhaps the most challenging aspects of setting up this environment is the management of secrets necessary to interact with the cloud in question.  This step might not be critical if the scripts you are testing don't need to actually communicated with a cloud(i.e. you're troubleshooting some syntax issue in a bash script).  
-
-~~~ yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: ibm-cloud-vmware-creds
-data:
-  secrets.sh: "...Cg=="
-  secret.auto.tfvars: "...Igo="
-
-~~~
-
-~~~ yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: cluster-profile
-data:
-  ssh-publickey: "c3N...nYK"
-  ssh-privatekey: "c3N...nYK"
-  pull-secret: "ey...19Cg=="
-~~~
+Artifacts from the workflow and the shared_dir are located in `/tmp`. The `--initialize` flag initializes the shared and artifact directories
+in preparation to run a workflow.
 
 
