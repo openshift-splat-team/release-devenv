@@ -82,7 +82,7 @@ def scan_dir_for(type, path, name, pathParts=""):
         if foundPath != None:
             return foundPath
 
-def processRef(ref):
+def processRef(ref, invoke_scripts=True):
     global path
     refPath = scan_dir_for("ref", env.RELEASE_REPO_PATH, ref)
     if refPath == None:
@@ -98,8 +98,13 @@ def processRef(ref):
                 if job in ref["as"]:
                     print("skipping ref")
                     return 0
-            result = subprocess.run(["bash" , shPath])
-            return result.returncode 
+            if invoke_scripts:
+                result = subprocess.run(["bash" , shPath])
+                return result.returncode
+            else:
+                if "credentials" in ref:
+                    print(ref["credentials"])
+
         except yaml.YAMLError as exc:
             print(exc)
     return 0
@@ -131,7 +136,7 @@ def processChain(chain):
             print(exc)
     return 1            
 
-def processWorkflow(workflow):
+def processWorkflow(workflow, invoke_scripts=True):
     global path
     initialize()
     workflowPath = scan_dir_for("workflow", env.RELEASE_REPO_PATH, workflow)
@@ -153,7 +158,7 @@ def processWorkflow(workflow):
                     preSteps = steps[stepType]
                     for step in preSteps:    
                         if "ref" in step:
-                            if processRef(step["ref"]) != 0 and stepType == "pre":
+                            if processRef(step["ref"], invoke_scripts=invoke_scripts) != 0 and stepType == "pre":
                                 print("step failed. exiting 'pre' chain")
                                 break
                         elif "chain" in step:                            
@@ -165,6 +170,9 @@ def processWorkflow(workflow):
                     
         except yaml.YAMLError as exc:
             print(exc)
+
+def discoverMountPaths(workflow):
+    pass
 
 def main():
     # Set up the argument parser
