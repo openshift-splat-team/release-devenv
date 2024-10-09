@@ -40,3 +40,8 @@ Artifacts from the workflow and the shared_dir are located in `/tmp`. The `--ini
 in preparation to run a workflow.
 
 
+## Examples
+
+Additionally, you can explore the additional example documentation
+at [`docs/examples`](./docs/examples), as well example environment
+files hosted under [`examples`](./examples) directory.
