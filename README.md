@@ -39,4 +39,40 @@ When adding support for a new workflow, the process is somewhat trial and error 
 Artifacts from the workflow and the shared_dir are located in `/tmp`. The `--initialize` flag initializes the shared and artifact directories
 in preparation to run a workflow.
 
+# Platforms
+
+Platforms and associated variants are stored in `./platforms`. Each platform variant will have the following files:
+- `env.py` - defines environment variables used by the job
+- `pre.sh` - handles initialization steps required before the workflow runs
+- `Containerfile` - defines a container image which packages required tools 
+- `init.sh` - creates sym-links to files required to setup and run the workflow on specific platform
+
+# Running in a Container
+
+## Initializing a Platform
+
+Before the container can be used to run a workflow, the platform must be initialized. From the root of the repository, run the `init.sh`
+For example, for vSphere:
+
+`./platforms/vsphere/init.sh`
+
+This symlinks files to the root of the repository which are used by the ci-runner.
+
+## Initializing Secrets
+
+Secrets are stored under `./vault` in the root of the repository. `./vault` is mounted to `/var/run/vault` in the container.
+
+## Running
+
+To prevent running a workflow from running tools which may only be present on the host and/or from installing tools which could impact the host, 
+`./run-in-container.sh` will create a container which mounts directories on the host. The following directories are created:
+
+- `./artifacts` -- contains artifacts from the workflow
+- `./vault` -- contains secrets from vault. the paths of the secrets should match what steps expect.
+- `./vault/home` -- the home dir used during the job. artifacts such as public key, pull-secret, etc.. are staged here for use by the workflow
+- `./platforms` -- contains the platforms supported by `ci-runner`
+
+`./run-in-container.sh` accepts the same arguments as `ci-runner.py`.
+
+__Note:__ Do not commit anything under `vault` or `artifacts`. 
 

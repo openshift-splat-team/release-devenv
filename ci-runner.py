@@ -56,9 +56,12 @@ def initialize():
 
     print("Setting up required artifacts")
     os.mkdir(f'/tmp/{env.CLUSTER_NAME}')
-    os.mkdir(f'/tmp/{env.CLUSTER_NAME}/shared')
-    os.mkdir(f'/tmp/{env.CLUSTER_NAME}/profile')
-    os.mkdir(f'/tmp/{env.CLUSTER_NAME}/artifact')
+    
+    if not os.path.isdir(env.PROFILE_DIR):
+        os.mkdir(env.PROFILE_DIR)
+    
+    os.mkdir(env.SHARED_DIR)
+    os.mkdir(env.ARTIFACT_DIR)    
     shutil.copyfile(env.SSH_PUBLIC_KEY, f'{env.PROFILE_DIR}/ssh-publickey')
     shutil.copyfile(env.PULL_SECRET_FILE, f'{env.PROFILE_DIR}/pull-secret')
     shutil.copyfile(env.AWS_CREDENTIAL_PATH, f'{env.PROFILE_DIR}/.awscred')
@@ -99,7 +102,11 @@ def processRef(ref, invoke_scripts=True):
                     print("skipping ref")
                     return 0
             if invoke_scripts:
-                result = subprocess.run(["bash" , shPath])
+                result = -1
+                if shPath.endswith(".py"):
+                    result = subprocess.run(["python" , shPath])
+                else :
+                    result = subprocess.run(["bash" , shPath])
                 return result.returncode
             else:
                 if "credentials" in ref:
@@ -182,7 +189,7 @@ def main():
     parser.add_argument('--run-chain', type=str, help='Run the specified chain')
     parser.add_argument('--run-step', type=str, help='Run the specified step')
     parser.add_argument('--run-workflow', type=str, help='Run the specified workflow')
-    parser.add_argument('--intialize', action='store_true', help='Initializes local directories to prepare for running artifacts')
+    parser.add_argument('--initialize', action='store_true', help='Initializes local directories to prepare for running artifacts')
     
     # Parse the arguments
     args = parser.parse_args()
@@ -197,7 +204,7 @@ def main():
     if args.run_workflow:
         processWorkflow(args.run_workflow)
 
-    if args.intialize:
+    if args.initialize:
         initialize()
 
 if __name__ == "__main__":

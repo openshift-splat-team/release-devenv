@@ -1,0 +1,5 @@
+artifacts/
+vault/
+/pre.sh
+/env.py
+/Containerfile
