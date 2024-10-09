@@ -4,6 +4,7 @@ import yaml
 import shutil
 import subprocess
 import argparse
+import logging
 import env
 
 env_vars = {
@@ -45,6 +46,20 @@ env_vars = {
 print("Setting up environment variables")
 for key in env_vars:    
     os.environ[key] = env_vars[key]
+
+def load_env_ref(envs):
+    """
+    Set default environment variables from ref (step) definition.
+    """
+    print("Setting up environment variables for ref")
+    for env_def in envs:
+        try:
+            # this allow override of env vars from ref
+            if env_def['name'] not in os.environ:
+                print(f"Setting default env value from Ref definition: key={env_def['name']} value={env_def['default']}")
+                os.environ[env_def['name']] = env_def['default']
+        except Exception as e:
+            logging.error(f"Error setting environment variable {env_def['name']}: {e}")
 
 def initialize():
     print("Initializing")
@@ -98,6 +113,9 @@ def processRef(ref, invoke_scripts=True):
                 if job in ref["as"]:
                     print("skipping ref")
                     return 0
+            # Load default env vars from ref when is defined
+            if 'env' in ref:
+                load_env_ref(ref["env"])
             if invoke_scripts:
                 result = subprocess.run(["bash" , shPath])
                 return result.returncode
