@@ -1,105 +1,144 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 import os
 import yaml
 import shutil
 import subprocess
 import argparse
 import logging
-import env
+from dotenv import load_dotenv
 
-env_vars = {
-    'PULL_SECRET_FILE': env.PULL_SECRET_FILE,
-    'CLUSTER_NAME': f'{env.CLUSTER_NAME}',
-    'SHARED_DIR': env.SHARED_DIR,
-    'ARTIFACT_DIR': env.ARTIFACT_DIR,
-    'PROFILE_DIR': env.PROFILE_DIR,
-    'CLUSTER_PROFILE_DIR': env.PROFILE_DIR,
-    'PLATFORM_EXTERNAL_CCM_ENABLED': 'yes',
-    'PROVIDER_NAME': env.PROVIDER_NAME,
-    'BASE_DOMAIN': env.BASE_DOMAIN,
-    'JOB_NAME': env.JOB_NAME,
-    'BUILD_ID': '000',
-    'AWS_REGION': env.AWS_REGION,
-    'LEASED_RESOURCE': env.AWS_REGION,
-    'BOOTSTRAP_INSTANCE_TYPE': 'm5.xlarge',
-    'MASTER_INSTANCE_TYPE': 'm5.xlarge',
-    'WORKER_INSTANCE_TYPE': 'm5.xlarge',
-    'OCP_ARCH': 'amd64',
-    'TELEMETRY_ENABLED': 'true',
-    'NAMESPACE': env.CLUSTER_NAME,
-    'PERSISTENT_MONITORING': 'false',
-    'OPENSHIFT_INSTALL_RELEASE_IMAGE_OVERRIDE': env.RELEASE_IMAGE,
-    'RELEASE_IMAGE_LATEST': env.RELEASE_IMAGE,
-    'UNIQUE_HASH': '12346',
-    'FIPS_ENABLED': 'false',
-    'BASELINE_CAPABILITY_SET': '',
-    #'BASELINE_CAPABILITY_SET': 'None',
-    # 'ADDITIONAL_ENABLED_CAPABILITIES': 'MachineAPI CloudCredential CloudControllerManager Ingress',
-    'ADDITIONAL_ENABLED_CAPABILITIES': '',
-    'PUBLISH': 'External',
-    'FEATURE_SET': '',
-    'FEATURE_GATES': '',
-    'MACHINE_CIDR': env.MACHINE_CIDR,
-    'CCM_NAMESPACE': env.CCM_NAMESPACE
-}
 
-print("Setting up environment variables")
-for key in env_vars:    
-    os.environ[key] = env_vars[key]
+# Check wether required environment varibles has been set on .env, otherwise fail quickly.
+required_dotenv_vars = [
+    'CLUSTER_NAME', 'BASE_DOMAIN',
+    'LEASED_RESOURCE', 'JOB_NAME',
+    'PULL_SECRET_FILE', 'RELEASE_REPO_PATH',
+    'SSH_PUBLIC_KEY']
+SKIP_STEPS=[]
+
+def load_env_vars():
+    """
+    Check required environment variables and load it from .env.
+    """
+    # Load environment from .env
+    load_dotenv()
+
+    # Check if required variables has been set in .env
+    errors = []
+    for key in required_dotenv_vars:
+        if key not in os.environ:
+            errors.append(key)
+        if len(errors) > 0:
+            raise Exception("Missing required environment variables: " + ', '.join(errors))
+
+    # Load default environment variables
+    print("Setting up environment variables")
+
+    # TODO(mtulio): move to a better place
+    default_env_vars = {
+        'BUILD_ID': '000',
+        'UNIQUE_HASH': 'abc',
+        'LEASED_RESOURCE': os.getenv('LEASED_RESOURCE'),
+        'JOB_NAME': os.getenv('JOB_NAME'),
+        'CI_WORKDIR': f'/tmp/{ os.getenv('CLUSTER_NAME') }',
+        'SHARED_DIR': f'/tmp/{ os.getenv('CLUSTER_NAME') }/shared',
+        'ARTIFACT_DIR': f'/tmp/{ os.getenv('CLUSTER_NAME') }/artifact',
+        'PROFILE_DIR': f'/tmp/{os.getenv('CLUSTER_NAME') }/profile',
+        'CLUSTER_PROFILE_DIR': f'/tmp/{ os.getenv('CLUSTER_NAME')}/profile',
+        'KUBECONFIG': f'/tmp/{ os.getenv('CLUSTER_NAME')}/shared/kubeconfig',
+        'NAMESPACE': os.getenv('CLUSTER_NAME'),
+        'OCP_ARCH':  os.getenv('CLUSTER_NAME', 'amd64'),
+        'PERSISTENT_MONITORING':  os.getenv('PERSISTENT_MONITORING', 'false'),
+    }
+    for key in default_env_vars:
+        try:
+            if key == 'SKIP_STEPS':
+                SKIP_STEPS = os.getenv('SKIP_STEPS').split(',')
+                print(f"Setting key={key} value={SKIP_STEPS}")
+                continue
+            print(f"Setting key={key} value={default_env_vars[key]}")
+            os.environ[key] = default_env_vars[key]
+        except Exception as e:
+            logging.error(f"Error setting environment variable {key}: {e}")
 
 def load_env_ref(envs):
     """
     Set default environment variables from ref (step) definition.
     """
     print("Setting up environment variables for ref")
+    loaded_vars = []
     for env_def in envs:
         try:
             # this allow override of env vars from ref
             if env_def['name'] not in os.environ:
-                print(f"Setting default env value from Ref definition: key={env_def['name']} value={env_def['default']}")
+                logging.debug(f"Setting default env value from Ref definition: key={env_def['name']} value={env_def['default']}")
+                loaded_vars.append(env_def['name'])
                 os.environ[env_def['name']] = env_def['default']
         except Exception as e:
             logging.error(f"Error setting environment variable {env_def['name']}: {e}")
 
+    return loaded_vars
+
+def unload_vars(vars):
+    """
+    Unload environment variables loaded from ref (step) definition.
+    """
+    for var in vars:
+        if var in os.environ:
+            del os.environ[var]
+
 def initialize():
+    """
+    Initialize the local directories to prepare for running steps.
+    """
     print("Initializing")
-    if os.path.exists(f'/tmp/{env.CLUSTER_NAME}'):
-        shutil.rmtree(f'/tmp/{env.CLUSTER_NAME}')
+    if os.path.exists(os.getenv('CI_WORKDIR')):
+        shutil.rmtree(os.getenv('CI_WORKDIR'))
     
     if os.path.exists(f'/tmp/install-dir'):
         shutil.rmtree('/tmp/install-dir')
 
     print("Setting up required artifacts")
-    os.mkdir(f'/tmp/{env.CLUSTER_NAME}')
-    os.mkdir(f'/tmp/{env.CLUSTER_NAME}/shared')
-    os.mkdir(f'/tmp/{env.CLUSTER_NAME}/profile')
-    os.mkdir(f'/tmp/{env.CLUSTER_NAME}/artifact')
-    shutil.copyfile(env.SSH_PUBLIC_KEY, f'{env.PROFILE_DIR}/ssh-publickey')
-    shutil.copyfile(env.PULL_SECRET_FILE, f'{env.PROFILE_DIR}/pull-secret')
-    shutil.copyfile(env.AWS_CREDENTIAL_PATH, f'{env.PROFILE_DIR}/.awscred')
+    os.mkdir(os.getenv('CI_WORKDIR'))
+    os.mkdir(os.getenv('SHARED_DIR'))
+    os.mkdir(os.getenv('PROFILE_DIR'))
+    os.mkdir(os.getenv('ARTIFACT_DIR'))
+    shutil.copyfile(os.getenv('SSH_PUBLIC_KEY'), f'{os.getenv('PROFILE_DIR')}/ssh-publickey')
+    shutil.copyfile(os.getenv('PULL_SECRET_FILE'), f'{os.getenv('PROFILE_DIR')}/pull-secret')
+    shutil.copyfile(os.getenv('AWS_CREDENTIAL_PATH'), f'{os.getenv('PROFILE_DIR')}/.awscred')
 
-def scan_dir_for(type, path, name, pathParts=""):        
-    if os.path.isfile(path):
-        filename = os.path.basename(path)
-        if filename == name + "-" + type + ".yaml":
-            return path
-        else:
-            return 
+def scan_dir_for(type, path, name, pathParts=""):
+    """
+    Walkthough the local release repository to manifest definition for each CI step.
+    """
+    try:
+        if '.git/' in path:
+            return
 
-    for filename in os.listdir(path):        
-        if os.path.isfile(filename):
-            pass
-        if pathParts != "":
-            thisPath = filename
-        else:
-            thisPath = "-" + filename
-        foundPath = scan_dir_for(type, path + "/" + filename, name, thisPath)
-        if foundPath != None:
-            return foundPath
+        if os.path.isfile(path):
+            filename = os.path.basename(path)
+            if filename == name + "-" + type + ".yaml":
+                return path
+            else:
+                return
+
+        for filename in os.listdir(path):
+            if os.path.isfile(filename):
+                pass
+            if pathParts != "":
+                thisPath = filename
+            else:
+                thisPath = "-" + filename
+            foundPath = scan_dir_for(type, path + "/" + filename, name, thisPath)
+            if foundPath != None:
+                return foundPath
+    except Exception as e:
+        logging.error(f"Error scanning directory for {type}: path={path} name={name}:\n {e}")
+        raise e
 
 def processRef(ref, invoke_scripts=True):
     global path
-    refPath = scan_dir_for("ref", env.RELEASE_REPO_PATH, ref)
+    refPath = scan_dir_for("ref", os.getenv('RELEASE_REPO_PATH'), ref)
     if refPath == None:
         print("ref[" + ref + "] not found")
         return 1
@@ -109,15 +148,20 @@ def processRef(ref, invoke_scripts=True):
             ref = ref["ref"]
             shPath = os.path.dirname(refPath) + "/" + ref["commands"]
             print("ref:["+ref["as"]+"]----> " + shPath)
-            for job in env.skipSteps:
+            for job in SKIP_STEPS:
                 if job in ref["as"]:
                     print("skipping ref")
                     return 0
             # Load default env vars from ref when is defined
+            loaded_step_vars = []
+            loaded_step_vars.clear()
             if 'env' in ref:
-                load_env_ref(ref["env"])
+                loaded_step_vars = load_env_ref(ref["env"])
+            
             if invoke_scripts:
                 result = subprocess.run(["bash" , shPath])
+                if len(loaded_step_vars) > 0:
+                    unload_vars(loaded_step_vars)
                 return result.returncode
             else:
                 if "credentials" in ref:
@@ -129,7 +173,7 @@ def processRef(ref, invoke_scripts=True):
 
 def processChain(chain):
     global path
-    chainPath = scan_dir_for("chain", env.RELEASE_REPO_PATH, chain)
+    chainPath = scan_dir_for("chain", os.getenv('RELEASE_REPO_PATH'), chain)
     if chainPath == None:
         print("chain[" + chain + "] not found")
         return 1
@@ -156,8 +200,7 @@ def processChain(chain):
 
 def processWorkflow(workflow, invoke_scripts=True):
     global path
-    initialize()
-    workflowPath = scan_dir_for("workflow", env.RELEASE_REPO_PATH, workflow)
+    workflowPath = scan_dir_for("workflow", os.getenv('RELEASE_REPO_PATH'), workflow)
     if workflowPath == None:
         print("workflow[" + workflow + "] not found")
         return
@@ -193,6 +236,8 @@ def discoverMountPaths(workflow):
     pass
 
 def main():
+    load_env_vars()
+
     # Set up the argument parser
     parser = argparse.ArgumentParser(description="A CLI tool for executing CI operator artifacts")
     
@@ -200,23 +245,21 @@ def main():
     parser.add_argument('--run-chain', type=str, help='Run the specified chain')
     parser.add_argument('--run-step', type=str, help='Run the specified step')
     parser.add_argument('--run-workflow', type=str, help='Run the specified workflow')
-    parser.add_argument('--intialize', action='store_true', help='Initializes local directories to prepare for running artifacts')
+    parser.add_argument('--intialize', '--init', action='store_true', help='Initializes local directories to prepare for running artifacts')
     
     # Parse the arguments
     args = parser.parse_args()
 
-    # Perform the appropriate actions based on the arguments
-    if args.run_chain:
-        processChain(args.run_chain)
-
-    if args.run_step:
-        processRef(args.run_step)
-
-    if args.run_workflow:
-        processWorkflow(args.run_workflow)
-
     if args.intialize:
         initialize()
+
+    # Perform the appropriate actions based on the arguments
+    if args.run_workflow:
+        processWorkflow(args.run_workflow)
+    elif args.run_chain:
+        processChain(args.run_chain)
+    elif args.run_step:
+        processRef(args.run_step)
 
 if __name__ == "__main__":
     main()
