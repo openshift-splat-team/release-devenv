@@ -1,0 +1,8 @@
+{
+    "tools": "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:7322ae0a4a9b0d8550ac92435010461ed4bedf0b59b03b83bf85bfb34c2de2f8",
+    "cli": "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:8255266c07d4dec7290e48b35b53f7aacb20bc6b642ee096b3bf31df83562af5",
+    "installer": "localhost/wip:latest",
+    "upi-installer": "localhost/wip:latest",
+    "test": "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:472c37c2eec3a84d570316f57ec323efaf32b23a43156bb81f8bd244be734662",
+    "vsphere-nested": "localhost/wip:latest"
+}

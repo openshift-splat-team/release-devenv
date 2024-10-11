@@ -29,7 +29,7 @@ options:
   --run-step RUN_STEP   Run the specified step
   --run-workflow RUN_WORKFLOW
                         Run the specified workflow
-  --intialize           Initializes local directories to prepare for running artifacts
+  --init                Initializes local directories to prepare for running artifacts
 ```
 
 When adding support for a new workflow, the process is somewhat trial and error to determine which variables need to be defined. 
