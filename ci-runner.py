@@ -14,7 +14,8 @@ required_dotenv_vars = [
     'LEASED_RESOURCE', 'JOB_NAME',
     'PULL_SECRET_FILE', 'RELEASE_REPO_PATH',
     'SSH_PUBLIC_KEY']
-SKIP_STEPS=[]
+
+#SKIP_STEPS=[]
 
 VOLUME_HOST_PATH = os.getenv("VOLUME_HOST_PATH",os.path.dirname(os.path.realpath(__file__))+"/volumes")
 WORKDIR_HOST_PATH = os.getenv("WORKDIR_HOST_PATH",os.path.dirname(os.path.realpath(__file__))+"/volumes/__runtime__")
@@ -60,7 +61,8 @@ def load_env_vars():
         'KUBECONFIG': f'{ os.getenv("SHARED_DIR")}/kubeconfig',
         'NAMESPACE': os.getenv('CLUSTER_NAME'),
         'OCP_ARCH':  os.getenv('CLUSTER_NAME', 'amd64'),
-        'PERSISTENT_MONITORING':  os.getenv('PERSISTENT_MONITORING', 'false')
+        'PERSISTENT_MONITORING':  os.getenv('PERSISTENT_MONITORING', 'false'),
+        'SKIP_STEPS': ''
     }
     for key in default_env_vars:
         try:
@@ -72,7 +74,7 @@ def load_env_vars():
             os.environ[key] = default_env_vars[key]
         except Exception as e:
             logging.error(f"Error setting environment variable {key}: {e}")
-    print(os.getenv("ARTIFACT_DIR"))
+
 def load_env_ref(envs):
     """
     Set default environment variables from ref (step) definition.
@@ -186,7 +188,8 @@ def runInPodman(ref):
         print("image: ", ref["from"])
         podmanArgs.append(ref["from"] + ":latest")
     else:
-        raise Exception("image not found. add \"from\" to the step and refer to a compatible local image.")
+        print("image not found. add \"from\" to the step and refer to a compatible local image. Will attempt to use localhost/dev:latest.")
+        podmanArgs.append("dev:latest")
     
     podmanArgs.append('python')
     podmanArgs.append('/usr/app/src/ci-runner.py')
@@ -215,6 +218,7 @@ def processRef(ref, invoke_scripts=True, run_in_image=False):
             ref = ref["ref"]
             shPath = os.path.dirname(refPath) + "/" + ref["commands"]
             print("ref:["+ref["as"]+"]----> " + shPath)
+            SKIP_STEPS = os.getenv('SKIP_STEPS').split(',')
             for job in SKIP_STEPS:
                 if job in ref["as"]:
                     print("skipping ref")
@@ -225,7 +229,7 @@ def processRef(ref, invoke_scripts=True, run_in_image=False):
             if 'env' in ref:
                 loaded_step_vars = load_env_ref(ref["env"])
             
-            if run_in_image:
+            if os.path.isfile(".images") and run_in_image:
                 runInPodman(ref)                
             elif invoke_scripts:
                 result = -1

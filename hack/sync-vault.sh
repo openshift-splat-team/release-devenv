@@ -6,13 +6,13 @@ function log() {
 
 export VAULT_ADDR="https://vault.ci.openshift.org"
 
-vault login -method=oidc
+vault login -address "${VAULT_ADDR}" -method=oidc
 
 VOLUMES="./volumes"
 
 function dumpSecretToPath() {
     SECRET_PATH=$1
-    vault kv get -mount="kv" --format=json "${SECRET_PATH}" > /tmp/secret.json
+    vault kv get -address "${VAULT_ADDR}" -mount="kv" --format=json "${SECRET_PATH}" > /tmp/secret.json
     KEYS=$(jq .data.data < "/tmp/secret.json" | jq -r keys[])
     SECRET_NAME=$(jq -r '.data.data["secretsync/target-name"]' < "/tmp/secret.json")
     VOLUME_PATH="${VOLUMES}/${SECRET_NAME}"
@@ -30,13 +30,13 @@ function dumpSecretToPath() {
     rm /tmp/secret.json
 }
 
-SECRETS=(
-    "selfservice/vsphere/ibmcloud/ci"
-    "selfservice/vsphere/ibmcloud/config"
-    "selfservice/vsphere-vmc/ci-route-53"
-)
-
+while IFS=$'\t' read -r -a SECRETS
+do
 for SECRET in "${SECRETS[@]}"; do
     dumpSecretToPath "${SECRET}"
 done
+
+done < .collections
+
+
 

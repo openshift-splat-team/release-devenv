@@ -1,6 +1,8 @@
 #!/bin/bash
 
-podman build -f .Containerfile -t wip
+if [ -f ".containerfile" ]; then
+    podman build -f .containerfile -t dev
+fi
 
 images=$(jq -c 'keys_unsorted' < .images)
 
