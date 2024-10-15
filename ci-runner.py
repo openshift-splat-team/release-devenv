@@ -200,7 +200,7 @@ def runInPodman(ref):
     print("container exit code: ", result.returncode)
 
     if result.returncode != 0:
-        raise Exception("step failed")
+        exit(result.returncode)
 
 def processRef(ref, invoke_scripts=True, run_in_image=False):
     global path
@@ -240,7 +240,7 @@ def processRef(ref, invoke_scripts=True, run_in_image=False):
                     print(result.stderr.decode())
                     
                 print("exit code: ", result.returncode)
-                return result.returncode
+                exit(result.returncode)                
             else:
                 if "from" in ref:
                     print("image: ", ref["from"])
