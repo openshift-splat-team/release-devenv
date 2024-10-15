@@ -26,5 +26,6 @@ RUN rm openshift-install-linux.tar.gz
 RUN curl -O -L https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64
 RUN chmod +x yq_linux_amd64
 RUN mv yq_linux_amd64 /usr/local/bin/yq
+RUN ln -s /usr/local/bin/yq /usr/local/bin/yq-go
 
 COPY . .
