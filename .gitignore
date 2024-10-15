@@ -1,1 +1,8 @@
 .env
+Containerfile*
+volumes/
+run/
+.images
+.Containerfile
+.collections
+.containerfile
