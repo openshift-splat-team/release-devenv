@@ -121,6 +121,7 @@ def initialize():
     os.makedirs(os.getenv('SHARED_DIR'), exist_ok=True)
     os.makedirs(os.getenv('PROFILE_DIR'), exist_ok=True)
     os.makedirs(os.getenv('ARTIFACT_DIR'), exist_ok=True)
+    os.makedirs(os.path.join(WORKDIR_HOST_PATH,"logs"), exist_ok=True)
     shutil.copyfile(os.getenv('SSH_PRIVATE_KEY'), f'{os.getenv("PROFILE_DIR")}/ssh-private')
     shutil.copyfile(os.getenv('SSH_PUBLIC_KEY'), f'{os.getenv("PROFILE_DIR")}/ssh-publickey')
     shutil.copyfile(os.getenv('PULL_SECRET_FILE'), f'{os.getenv("PROFILE_DIR")}/pull-secret')
@@ -154,6 +155,17 @@ def scan_dir_for(type, path, name, pathParts=""):
     except Exception as e:
         logging.error(f"Error scanning directory for {type}: path={path} name={name}:\n {e}")
         raise e
+
+def spawnProcess(args, step_name):
+    with open(os.path.join(WORKDIR_HOST_PATH,"logs", step_name + ".log"), 'w') as f:
+        with subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=os.environ) as p:
+            while True:
+                text = p.stdout.read1().decode("utf-8")
+                f.write(text)
+                print(text, end='', flush=True)
+                ret = p.poll()
+                if ret is not None:
+                    return {"returncode": ret}
 
 def runInPodman(ref):        
     release_path = os.getenv('RELEASE_REPO_PATH')
@@ -197,13 +209,12 @@ def runInPodman(ref):
     podmanArgs.append(ref["as"])
     
     print('podman command: ',' '.join([str(x) for x in podmanArgs]))
-    result = subprocess.run(podmanArgs, capture_output=True, env=os.environ)
-    print(result.stdout.decode())
-    print(result.stderr.decode())
-    print("container exit code: ", result.returncode)
+    result = spawnProcess(podmanArgs, ref["as"])
+    
+    print("container exit code: ", result["returncode"])
 
-    if result.returncode != 0:
-        exit(result.returncode)
+    if result["returncode"] != 0:
+        exit(result["returncode"])
 
 def processRef(ref, invoke_scripts=True, run_in_image=False):
     global path
@@ -233,18 +244,14 @@ def processRef(ref, invoke_scripts=True, run_in_image=False):
                 runInPodman(ref)                
             elif invoke_scripts:
                 result = -1
-                if shPath.endswith(".py"):
-                    result = subprocess.run(["python" , shPath], capture_output=True, env=os.environ)
-                    print(result.stdout.decode())
-                    print(result.stderr.decode())
+                if shPath.endswith(".py"):                    
+                    result = spawnProcess(["python" , shPath], ref["as"])
                 else:
                     print("starting ", shPath)
-                    result = subprocess.run(["bash" , shPath], capture_output=True, env=os.environ)
-                    print(result.stdout.decode())
-                    print(result.stderr.decode())
+                    result = spawnProcess(["bash" , shPath], ref["as"])
                     
-                print("exit code: ", result.returncode)
-                exit(result.returncode)                
+                print("exit code: ", result["returncode"])
+                exit(result["returncode"])                
             else:
                 if "from" in ref:
                     print("image: ", ref["from"])
