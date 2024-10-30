@@ -4,5 +4,5 @@
     "installer": "localhost/dev:latest",
     "upi-installer": "localhost/dev:latest",
     "test": "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:472c37c2eec3a84d570316f57ec323efaf32b23a43156bb81f8bd244be734662",
-    "vsphere-nested": "localhost/dev:latest"
+    "nested-environment-builder": "localhost/dev:latest"
 }
