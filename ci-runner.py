@@ -14,7 +14,19 @@ required_dotenv_vars = [
     'LEASED_RESOURCE', 'JOB_NAME',
     'PULL_SECRET_FILE', 'RELEASE_REPO_PATH',
     'SSH_PUBLIC_KEY']
-SKIP_STEPS=[]
+
+#SKIP_STEPS=[]
+
+VOLUME_HOST_PATH = os.getenv("VOLUME_HOST_PATH",os.path.dirname(os.path.realpath(__file__))+"/volumes")
+WORKDIR_HOST_PATH = os.getenv("WORKDIR_HOST_PATH",os.path.dirname(os.path.realpath(__file__))+"/volumes/__runtime__")
+os.environ['VOLUME_HOST_PATH'] = VOLUME_HOST_PATH
+os.environ['WORKDIR_HOST_PATH'] = WORKDIR_HOST_PATH
+
+def get_env_or_die(name):
+    val = os.getenv(name)
+    if val == None:
+        raise Exception("environment variable: ", name, " is required but not defined")        
+    return val
 
 def load_env_vars():
     """
@@ -35,20 +47,22 @@ def load_env_vars():
     print("Setting up environment variables")
 
     # TODO(mtulio): move to a better place
+
     default_env_vars = {
         'BUILD_ID': '000',
         'UNIQUE_HASH': 'abc',
-        'LEASED_RESOURCE': os.getenv('LEASED_RESOURCE'),
-        'JOB_NAME': os.getenv('JOB_NAME'),
-        'CI_WORKDIR': f'/tmp/{ os.getenv('CLUSTER_NAME') }',
-        'SHARED_DIR': f'/tmp/{ os.getenv('CLUSTER_NAME') }/shared',
-        'ARTIFACT_DIR': f'/tmp/{ os.getenv('CLUSTER_NAME') }/artifact',
-        'PROFILE_DIR': f'/tmp/{os.getenv('CLUSTER_NAME') }/profile',
-        'CLUSTER_PROFILE_DIR': f'/tmp/{ os.getenv('CLUSTER_NAME')}/profile',
-        'KUBECONFIG': f'/tmp/{ os.getenv('CLUSTER_NAME')}/shared/kubeconfig',
+        'LEASED_RESOURCE': get_env_or_die('LEASED_RESOURCE'),
+        'JOB_NAME': get_env_or_die('JOB_NAME'),
+        'CI_WORKDIR': f'/tmp/{ get_env_or_die("CLUSTER_NAME") }',
+        'SHARED_DIR': f'{ WORKDIR_HOST_PATH }/shared',
+        'ARTIFACT_DIR': f'{ WORKDIR_HOST_PATH }/artifact',
+        'PROFILE_DIR': f'{ VOLUME_HOST_PATH }/cluster-profile',
+        'CLUSTER_PROFILE_DIR': f'{ VOLUME_HOST_PATH }/cluster-profile',
+        'KUBECONFIG': f'{ os.getenv("SHARED_DIR")}/kubeconfig',
         'NAMESPACE': os.getenv('CLUSTER_NAME'),
         'OCP_ARCH':  os.getenv('CLUSTER_NAME', 'amd64'),
         'PERSISTENT_MONITORING':  os.getenv('PERSISTENT_MONITORING', 'false'),
+        'SKIP_STEPS': ''
     }
     for key in default_env_vars:
         try:
@@ -85,13 +99,17 @@ def unload_vars(vars):
     """
     for var in vars:
         if var in os.environ:
-            del os.environ[var]
+                del os.environ[var]
 
 def initialize():
     """
     Initialize the local directories to prepare for running steps.
     """
     print("Initializing")
+
+    if os.path.exists(WORKDIR_HOST_PATH):
+        shutil.rmtree(WORKDIR_HOST_PATH)
+
     if os.path.exists(os.getenv('CI_WORKDIR')):
         shutil.rmtree(os.getenv('CI_WORKDIR'))
     
@@ -99,13 +117,15 @@ def initialize():
         shutil.rmtree('/tmp/install-dir')
 
     print("Setting up required artifacts")
-    os.mkdir(os.getenv('CI_WORKDIR'))
-    os.mkdir(os.getenv('SHARED_DIR'))
-    os.mkdir(os.getenv('PROFILE_DIR'))
-    os.mkdir(os.getenv('ARTIFACT_DIR'))
-    shutil.copyfile(os.getenv('SSH_PUBLIC_KEY'), f'{os.getenv('PROFILE_DIR')}/ssh-publickey')
-    shutil.copyfile(os.getenv('PULL_SECRET_FILE'), f'{os.getenv('PROFILE_DIR')}/pull-secret')
-    shutil.copyfile(os.getenv('AWS_CREDENTIAL_PATH'), f'{os.getenv('PROFILE_DIR')}/.awscred')
+    os.makedirs(os.getenv('CI_WORKDIR'), exist_ok=True)
+    os.makedirs(os.getenv('SHARED_DIR'), exist_ok=True)
+    os.makedirs(os.getenv('PROFILE_DIR'), exist_ok=True)
+    os.makedirs(os.getenv('ARTIFACT_DIR'), exist_ok=True)
+    os.makedirs(os.path.join(WORKDIR_HOST_PATH,"logs"), exist_ok=True)
+    shutil.copyfile(os.getenv('SSH_PRIVATE_KEY'), f'{os.getenv("PROFILE_DIR")}/ssh-private')
+    shutil.copyfile(os.getenv('SSH_PUBLIC_KEY'), f'{os.getenv("PROFILE_DIR")}/ssh-publickey')
+    shutil.copyfile(os.getenv('PULL_SECRET_FILE'), f'{os.getenv("PROFILE_DIR")}/pull-secret')
+    shutil.copyfile(os.getenv('AWS_CREDENTIAL_PATH'), f'{os.getenv("PROFILE_DIR")}/.awscred')
 
 def scan_dir_for(type, path, name, pathParts=""):
     """
@@ -136,8 +156,69 @@ def scan_dir_for(type, path, name, pathParts=""):
         logging.error(f"Error scanning directory for {type}: path={path} name={name}:\n {e}")
         raise e
 
-def processRef(ref, invoke_scripts=True):
+def spawnProcess(args, step_name):
+    with open(os.path.join(WORKDIR_HOST_PATH,"logs", step_name + ".log"), 'w') as f:
+        with subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=os.environ) as p:
+            while True:
+                text = p.stdout.read1().decode("utf-8")
+                f.write(text)
+                print(text, end='', flush=True)
+                ret = p.poll()
+                if ret is not None:
+                    return {"returncode": ret}
+
+def runInPodman(ref):        
+    release_path = os.getenv('RELEASE_REPO_PATH')
+    podmanArgs = ["podman", "run"]
+    if "credentials" in ref:
+        for credential in ref["credentials"]:
+            volume_name = credential["name"]
+            volume_path = os.path.join(VOLUME_HOST_PATH, volume_name)
+            if os.path.isdir(volume_path) == False:
+                print("!!! volume ", volume_name, " not found. will not mount the secret.")
+                continue
+            podmanArgs.append("-v")
+            podmanArgs.append(volume_path+":"+credential["mount_path"]+":z")
+
+    podmanArgs.append("-v")
+    podmanArgs.append(release_path+":"+release_path+":z")
+
+    podmanArgs.append("-v")
+    podmanArgs.append(os.path.join(VOLUME_HOST_PATH,"cluster-profile")+":/var/run/secrets/ci.openshift.io/cluster-profile:z")
+
+    podmanArgs.append("-v")
+    print("volume path: ", os.path.join(VOLUME_HOST_PATH,"__runtime__"))    
+    podmanArgs.append(VOLUME_HOST_PATH+":/usr/app/src/volumes:z")
+
+    podmanArgs.append("-a")
+    podmanArgs.append("STDERR")
+
+    podmanArgs.append("-a")
+    podmanArgs.append("STDOUT")
+
+    if "from" in ref:
+        print("image: ", ref["from"])
+        podmanArgs.append(ref["from"] + ":latest")
+    else:
+        print("image not found. add \"from\" to the step and refer to a compatible local image. Will attempt to use localhost/dev:latest.")
+        podmanArgs.append("dev:latest")
+    
+    podmanArgs.append('python')
+    podmanArgs.append('/usr/app/src/ci-runner.py')
+    podmanArgs.append('--run-step')
+    podmanArgs.append(ref["as"])
+    
+    print('podman command: ',' '.join([str(x) for x in podmanArgs]))
+    result = spawnProcess(podmanArgs, ref["as"])
+    
+    print("container exit code: ", result["returncode"])
+
+    if result["returncode"] != 0:
+        exit(result["returncode"])
+
+def processRef(ref, invoke_scripts=True, run_in_image=False):
     global path
+    
     refPath = scan_dir_for("ref", os.getenv('RELEASE_REPO_PATH'), ref)
     if refPath == None:
         print("ref[" + ref + "] not found")
@@ -148,6 +229,7 @@ def processRef(ref, invoke_scripts=True):
             ref = ref["ref"]
             shPath = os.path.dirname(refPath) + "/" + ref["commands"]
             print("ref:["+ref["as"]+"]----> " + shPath)
+            SKIP_STEPS = os.getenv('SKIP_STEPS').split(',')
             for job in SKIP_STEPS:
                 if job in ref["as"]:
                     print("skipping ref")
@@ -158,20 +240,30 @@ def processRef(ref, invoke_scripts=True):
             if 'env' in ref:
                 loaded_step_vars = load_env_ref(ref["env"])
             
-            if invoke_scripts:
-                result = subprocess.run(["bash" , shPath])
-                if len(loaded_step_vars) > 0:
-                    unload_vars(loaded_step_vars)
-                return result.returncode
+            if os.path.isfile(".images") and run_in_image:
+                runInPodman(ref)                
+            elif invoke_scripts:
+                result = -1
+                if shPath.endswith(".py"):                    
+                    result = spawnProcess(["python" , shPath], ref["as"])
+                else:
+                    print("starting ", shPath)
+                    result = spawnProcess(["bash" , shPath], ref["as"])
+                    
+                print("exit code: ", result["returncode"])
+                exit(result["returncode"])                
             else:
+                if "from" in ref:
+                    print("image: ", ref["from"])
                 if "credentials" in ref:
-                    print(ref["credentials"])
+                    for credential in ref["credentials"]:
+                        print("volume: ", credential["name"])
 
         except yaml.YAMLError as exc:
             print(exc)
     return 0
 
-def processChain(chain):
+def processChain(chain, invoke_scripts=True, run_in_image=False):
     global path
     chainPath = scan_dir_for("chain", os.getenv('RELEASE_REPO_PATH'), chain)
     if chainPath == None:
@@ -187,19 +279,19 @@ def processChain(chain):
             steps = chain["steps"]
             for step in steps:
                 if "ref" in step:                    
-                    if processRef(step["ref"]) != 0:
-                        print("failed")
-                        exit(1)                   
+                    if processRef(step["ref"], invoke_scripts=invoke_scripts, run_in_image=run_in_image) != 0:
+                        raise Exception("step failed")
                 if "chain" in step:
                     print("chain:["+chain["as"]+"]-->")
-                    processChain(step["chain"])
+                    processChain(step["chain"], invoke_scripts=invoke_scripts, run_in_image=run_in_image)
                     
         except yaml.YAMLError as exc:
             print(exc)
     return 1            
 
-def processWorkflow(workflow, invoke_scripts=True):
+def processWorkflow(workflow, invoke_scripts=True, run_in_image=True):
     global path
+
     workflowPath = scan_dir_for("workflow", os.getenv('RELEASE_REPO_PATH'), workflow)
     if workflowPath == None:
         print("workflow[" + workflow + "] not found")
@@ -208,8 +300,8 @@ def processWorkflow(workflow, invoke_scripts=True):
         try:
             workflow = yaml.safe_load(stream)            
             if "workflow" not in workflow:
-                print("yaml is not a workflow")
-                return
+                raise Exception("yaml is not a workflow")
+                
             workflow = workflow["workflow"]
             steps = workflow["steps"]
             stepTypes = ["pre", "test", "post"]
@@ -219,18 +311,18 @@ def processWorkflow(workflow, invoke_scripts=True):
                     preSteps = steps[stepType]
                     for step in preSteps:    
                         if "ref" in step:
-                            if processRef(step["ref"], invoke_scripts=invoke_scripts) != 0 and stepType == "pre":
-                                print("step failed. exiting 'pre' chain")
+                            if processRef(step["ref"], invoke_scripts=invoke_scripts, run_in_image=run_in_image) != 0 and stepType == "pre":
+                                raise Exception("step failed. exiting 'pre' chain")
                                 break
                         elif "chain" in step:                            
-                            if processChain(step["chain"]) !=0 and stepType == "pre":
-                                print("chain failed. exiting 'pre' chain")
+                            if processChain(step["chain"], invoke_scripts=invoke_scripts, run_in_image=run_in_image) !=0 and stepType == "pre":
+                                raise Exception("chain failed. exiting 'pre' chain")
                                 break
                         else:
-                            print("unrecognized step class - " + step)
+                            raise Exception("unrecognized step class - " + step)
                     
         except yaml.YAMLError as exc:
-            print(exc)
+            raise Exception(exc)
 
 def discoverMountPaths(workflow):
     pass
@@ -243,23 +335,26 @@ def main():
     
     # Define the arguments
     parser.add_argument('--run-chain', type=str, help='Run the specified chain')
-    parser.add_argument('--run-step', type=str, help='Run the specified step')
+    parser.add_argument('--run-step', type=str, help='Run the specified step')    
+    parser.add_argument('--run-in-image', action='store_true', help='Run the step in an image associated with the step')
     parser.add_argument('--run-workflow', type=str, help='Run the specified workflow')
-    parser.add_argument('--intialize', '--init', action='store_true', help='Initializes local directories to prepare for running artifacts')
+    parser.add_argument('--print-workflow', type=str, help='Prints images and volumes required by a workflow')
+    parser.add_argument('--initialize', '--init', action='store_true', help='Initializes local directories to prepare for running artifacts')
     
     # Parse the arguments
     args = parser.parse_args()
 
-    if args.intialize:
+    if args.initialize:
         initialize()
 
     # Perform the appropriate actions based on the arguments
     if args.run_workflow:
-        processWorkflow(args.run_workflow)
+        processWorkflow(args.run_workflow, run_in_image=args.run_in_image)
+    elif args.print_workflow:
+        processWorkflow(args.print_workflow, invoke_scripts=False)        
     elif args.run_chain:
-        processChain(args.run_chain)
+        processChain(args.run_chain, run_in_image=args.run_in_image)
     elif args.run_step:
-        processRef(args.run_step)
-
+        processRef(args.run_step, run_in_image=args.run_in_image)
 if __name__ == "__main__":
     main()
