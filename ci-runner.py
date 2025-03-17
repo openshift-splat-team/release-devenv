@@ -250,8 +250,9 @@ def processRef(ref, invoke_scripts=True, run_in_image=False):
                     print("starting ", shPath)
                     result = spawnProcess(["bash" , shPath], ref["as"])
                     
-                print("exit code: ", result["returncode"])
-                exit(result["returncode"])                
+                print(f"exit code: [{result["returncode"]}]\n")
+                if result["returncode"] != 0:
+                    exit(result["returncode"])
             else:
                 if "from" in ref:
                     print("image: ", ref["from"])
